@@ -1,18 +1,19 @@
 package utils
 
 import (
-    "mime/multipart"
-    "path/filepath"
-	"encoding/json"
-	"io/ioutil"
-	"net/http"
-	"strings"
 	"bufio"
-    "bytes"
-	"time"
+	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"mime/multipart"
+	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
+	"time"
 )
 
 func ValidateEndpoints (src string, dst string) error {
@@ -27,10 +28,13 @@ func GenerateTempFileName(prefix, suffix string) string {
 	return filepath.Join(os.TempDir(), fmt.Sprintf("%s%d%s", prefix, time.Now().UnixNano(), suffix))
 }
 
-func GetIPFS(url string, payload io.Reader) (*http.Response, error) {
+func GetIPFS(c int, url string, payload io.Reader, r chan HTTPResult) {
     req, err := http.NewRequest(http.MethodGet, url, payload)
     if err != nil {
-        return nil, fmt.Errorf("Error creating HTTP request: %s", err)
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error creating HTTP request: %s", err),
+	}
     }
 
     // Set custom User-Agent for cloudflare WAF policies
@@ -41,7 +45,10 @@ func GetIPFS(url string, payload io.Reader) (*http.Response, error) {
 
     res, err := client.Do(req)
     if err != nil {
-        return nil, fmt.Errorf("Error making API request: %s", err)
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error making API request: %s", err),
+	}
     }
 
     if s := res.Status; strings.HasPrefix(s, "5") || strings.HasPrefix(s, "4") {
@@ -49,54 +56,84 @@ func GetIPFS(url string, payload io.Reader) (*http.Response, error) {
         var dirIPFS IPFSErrorResponse
         _ = UnmarshalToStruct[IPFSErrorResponse](res.Body, &dirIPFS)
         if dirIPFS.Message == IPFS_DIR_ERROR {
-            return nil, fmt.Errorf("Cannot get this IPFS CID. Error message: %s", dirIPFS.Message)
+	    r <- HTTPResult{
+		HTTPResponse: nil,
+		Error: fmt.Errorf("Cannot get this IPFS CID. Error message: %s", dirIPFS.Message),
+		Counter: c,
+	    }
         } else {
-            return nil, fmt.Errorf("There was an error with the request. Error code: HTTP %s", s)
+	    r <- HTTPResult{
+		HTTPResponse: nil,
+		Error: fmt.Errorf("There was an error with the request. Error code: HTTP %s", s),
+	    }
         }
     }
 
-    return res, nil
+    r <- HTTPResult{
+	HTTPResponse: res,
+	Error: nil,
+	Counter: c,
+    }
 }
 
-func PostIPFS(url string, payload []byte) (*http.Response, error) {
+func PostIPFS(c int, url string, payload []byte, r chan HTTPResult) {
     // Generate a unique temporary file name
-	tempFileName := GenerateTempFileName("ipfs-data-", ".tmp")
+    tempFileName := GenerateTempFileName("ipfs-data-", ".tmp")
 
     // Create a temporary file to store the IPFS object data
-	tempFile, err := os.Create(tempFileName)
-	if err != nil {
-		return nil, fmt.Errorf("Error creating temporary file: %s", err)
+    tempFile, err := os.Create(tempFileName)
+    if err != nil {
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error creating temporary file: %s", err),
+	    Counter: c,
 	}
-	defer tempFile.Close()
+    }
+    defer tempFile.Close()
 
     // Write the IPFS object data to the temporary file
     _, err = tempFile.Write(payload)
-	if err != nil {
-		return nil, fmt.Errorf("Error writing data to temporary file: %s", err)
+    if err != nil {
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error writing data to temporary file: %s", err),
 	}
+    }
 
     // Create a new HTTP POST request to add the file to the destination
-	body := &bytes.Buffer{}
+    body := &bytes.Buffer{}
     writer := multipart.NewWriter(body)
     filePart, err := writer.CreateFormFile("file", filepath.Base(tempFileName))
-	if err != nil {
-		return nil, fmt.Errorf("Error creating form file: %s", err)
+    if err != nil {
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error creating form file: %s", err),
+	    Counter: c,
 	}
+    }
 
     // Reset the temporary file pointer to the beginning
-	tempFile.Seek(0, 0)
+    tempFile.Seek(0, 0)
 
-	// Copy the temporary file data into the form file
-	_, err = io.Copy(filePart, tempFile)
-	if err != nil {
-		return nil, fmt.Errorf("Error copying file data: %s", err)
+    // Copy the temporary file data into the form file
+    _, err = io.Copy(filePart, tempFile)
+    if err != nil {
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error copying file data: %s", err),
+	    Counter: c,
 	}
+    }
 
-	writer.Close() // Close the multipart writer
+    writer.Close() // Close the multipart writer
 
     req, err := http.NewRequest(http.MethodPost, url, body)
     if err != nil {
-        return nil, fmt.Errorf("There was an error creating the HTTP request: %s", err)
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("There was an error creating the HTTP request: %s", err),
+	    Counter: c,
+	}
     }
 
     // Set custom User-Agent for cloudflare WAF policies
@@ -109,14 +146,26 @@ func PostIPFS(url string, payload []byte) (*http.Response, error) {
 
     res, err := client.Do(req)
     if err != nil {
-        return nil, fmt.Errorf("Error making API request: %s", err)
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("Error making API request: %s", err),
+	    Counter: c,
+	}
     }
 
     if s := res.Status; strings.HasPrefix(s, "5") || strings.HasPrefix(s, "4") {
-        return nil, fmt.Errorf("The endpoint responded with: HTTP %s", s)
+	r <- HTTPResult{
+	    HTTPResponse: nil,
+	    Error: fmt.Errorf("The endpoint responded with: HTTP %s", s),
+	    Counter: c,
+	}
     }
 
-    return res, nil
+    r <- HTTPResult{
+	HTTPResponse: res,
+	Error: nil,
+	Counter: c,
+    }
 }
 
 func GetHTTPBody(h *http.Response) ([]byte, error) {

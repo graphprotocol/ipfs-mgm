@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -33,6 +34,8 @@ func Sync(cmd *cobra.Command) {
 	timeStart := time.Now()
 	failed := 0
 	synced := 0
+
+	r := make(chan utils.HTTPResult)
 
 	var cids []utils.IPFSCIDResponse
 
@@ -69,18 +72,16 @@ func Sync(cmd *cobra.Command) {
 		log.Printf("Syncing from %s to %s\n", src, dst)
 
 		// Create the API URL for the IPFS pin/ls operation
-		apiURL := src + utils.IPFS_LIST_ENDPOINT
+		srcURL := src + utils.IPFS_LIST_ENDPOINT
 
-		// Get the HTTP response
-		res, err := utils.PostIPFS(apiURL, nil)
-		if err != nil {
-			fmt.Println(err)
+		// Get the list of all CID's from the source IPFS
+		go utils.PostIPFS(0, srcURL, nil, r)
+		res := <- r
+		if res.Error != nil {
+			fmt.Println(res.Error)
 		}
 
-		// // Get the HTTP body
-		// body, _ := utils.GetHTTPBody(res)
-
-		scanner := bufio.NewScanner(res.Body)
+		scanner := bufio.NewScanner(res.HTTPResponse.Body)
 		for scanner.Scan() {
 			var j utils.IPFSCIDResponse
 			err := json.Unmarshal(scanner.Bytes(), &j)
@@ -92,59 +93,62 @@ func Sync(cmd *cobra.Command) {
 	}
 
 	// Create the API URL for the IPFS GET
-	apiGet := src + utils.IPFS_CAT_ENDPOINT
+	srcGet := src + utils.IPFS_CAT_ENDPOINT
 
 	counter := 1
 	length := len(cids)
 	for _, k := range cids {
 		// Get IPFS CID from source
-		apiCID := apiGet + k.Cid
+		srcCID := srcGet + k.Cid
 		log.Printf("%d/%d: Syncing the CID: %s\n",counter, length, k.Cid)
 
 		// Get CID from source
-		cid, err := utils.GetIPFS(apiCID, nil)
-		if err != nil {
-			log.Printf("%d/%d: %s",counter, length, err)
+		go utils.GetIPFS(counter, srcCID, nil, r)
+		resC := <-r
+		if resC.Error != nil {
+			log.Printf("%d/%d: %s",resC.Counter, length, resC.Error)
 			failed += 1
 			counter += 1
 			continue
 		}
-		defer cid.Body.Close()
+		defer resC.HTTPResponse.Body.Close()
 
 		cidV := utils.GetCIDVersion(k.Cid)
 		// Create the API URL fo the POST on destination
 		apiADD := fmt.Sprintf("%s%s?cid-version=%s", dst, utils.IPFS_PIN_ENDPOINT, cidV)
 
-		newBody, err := utils.GetHTTPBody(cid)
+		newBody, err := utils.GetHTTPBody(resC.HTTPResponse)
 		if err != nil {
-			log.Printf("%d/%d: %s",counter, length, err)
+			log.Printf("%d/%d: %s",resC.Counter, length, err)
 		}
 
 		// Sync IPFS CID into destination
-		var r utils.IPFSResponse
-		add, err := utils.PostIPFS(apiADD, newBody)
-		if err != nil {
-			log.Printf("%d/%d: %s",counter, length, err)
+		// TODO: implement retry backoff with pester
+		var m utils.IPFSResponse
+		go utils.PostIPFS(resC.Counter, apiADD, newBody, r)
+		resP := <- r
+		if resP.Error != nil {
+			log.Printf("%d/%d: %s", resP.Counter, length, resP.Error)
 			failed += 1
 		} else {
-			defer add.Body.Close()
+			defer resP.HTTPResponse.Body.Close()
 
 			// Generic function to parse the response and create a struct
-			err := utils.UnmarshalToStruct[utils.IPFSResponse](add.Body, &r)
+			err := utils.UnmarshalToStruct[utils.IPFSResponse](resC.HTTPResponse.Body, &m)
 			if err != nil {
-				log.Printf("%d/%d: %s",counter, length, err)
+				log.Printf("%d/%d: %s", resP.Counter, length, err)
 			}
 		}
 
 		// Check if the IPFS Hash is the same as the source one
 		// If not the syncing didn't work
-		ok, err := utils.TestIPFSHash(k.Cid, r.Hash)
+		ok, err := utils.TestIPFSHash(k.Cid, m.Hash)
 		if err != nil {
-			log.Printf("%d/%d: %s",counter, length, err)
+			log.Printf("%d/%d: %s",resP.Counter, length, err)
 			failed += 1
 		} else {
 			// Print success message
-			log.Printf("%d/%d: %s",counter, length, ok)
+			log.Printf("%d/%d: %s",resP.Counter, length, ok)
 			synced += 1
 		}
 		counter += 1
@@ -156,41 +160,3 @@ func Sync(cmd *cobra.Command) {
 	log.Printf("Total time: %s\n", time.Since(timeStart))
 }
 
-// func getFromFile(url string, f string) {
-// 	log.Println("Syncing from file")
-//
-// 	cids, err := utils.ReadCDIFromFile(f)
-// 	if err != nil {
-// 		fmt.Println(err)
-// 	}
-// 	log.Println(cids)
-//
-// 	for _, v := range cids {
-// 		log.Println(v)
-// 		// Create the API URL for the IPFS GET operation without the CID ID
-// 		apiGet := url + utils.IPFS_CAT_ENDPOINT + v
-// 	}
-// 	// // Create the API URL for the IPFS GET request
-// 	// apiUrl := url + utils.IPFS_CAT_ENDPOINT
-// 	//
-// 	// f, err := os.Open(f)
-// 	// if err != nil {
-// 	// 	log.Println(err)
-// 	// }
-// 	//
-// 	// // Make GET HTTP request
-// 	// res, err := utils.GetIPFS(apiUrl)
-// 	// if err != nil {
-// 	// 	fmt.Println(err)
-// 	// }
-// 	//
-// 	// //Get the HTTP body
-// 	// body, _ := utils.GetHTTPBody(res)
-// 	//
-// 	// fmt.Println(string(body))
-// 	// os.Exit(0)
-//
-// 	// Print Final statistics
-// 	log.Printf("Total number of objects: %d; Synced: %d; Failed: %d\n", len(sliceIPFS), synced, failed)
-// 	log.Printf("Total time: %s\n", time.Since(timeStart))
-// }
