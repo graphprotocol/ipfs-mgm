@@ -106,6 +106,7 @@ func Sync(cmd *cobra.Command) {
 		if err != nil {
 			log.Printf("%d/%d: %s",counter, length, err)
 			failed += 1
+			counter += 1
 			continue
 		}
 		defer cid.Body.Close()
@@ -137,12 +138,13 @@ func Sync(cmd *cobra.Command) {
 
 		// Check if the IPFS Hash is the same as the source one
 		// If not the syncing didn't work
-		_, err = utils.TestIPFSHash(k.Cid, r.Hash)
+		ok, err := utils.TestIPFSHash(k.Cid, r.Hash)
 		if err != nil {
 			log.Printf("%d/%d: %s",counter, length, err)
 			failed += 1
 		} else {
 			// Print success message
+			log.Printf("%d/%d: %s",counter, length, ok)
 			synced += 1
 		}
 		counter += 1
