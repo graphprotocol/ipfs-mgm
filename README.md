@@ -12,7 +12,7 @@ go install cmd/cli/ipfs-mgm.go
 Transfer all files from one IPFS node to another:
 
 ```bash
-ipfs-mgm sync -s https://api.thegraph.com -d https://ipfs.thegraph.com
+ipfs-mgm sync -s <SOURCE URL> -d <DESTINATION URL>
 ```
 
 Transfer only specific files from one IPFS node to another:
