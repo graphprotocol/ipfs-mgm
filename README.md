@@ -54,9 +54,13 @@ QmfNueFQg19hyBtCRUPJRpxVtdwtp8cgWpuRoQpRP3n9st
 
 ## Docker
 
-- TO BE ADDED
+The easiest way is to use the built docker image
+
+```bash
+docker run -it ghcr.io/graphprotocol/ipfs-mgm sync --help
+```
 
 ## TODO:
 
-- [ ] Implement assync calls by creating a worker queue in batches
+- [ ] Implement async calls by creating a worker queue in batches
 - [ ] Add directory support for sync operation
