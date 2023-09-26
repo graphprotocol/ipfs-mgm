@@ -34,10 +34,9 @@ func Sync(cmd *cobra.Command) {
 	failed := 0
 	synced := 0
 
-	r := make(chan utils.HTTPResult)
-
 	var cids []utils.IPFSCIDResponse
 
+	// Get all command flags
 	src, err := cmd.Flags().GetString("source")
 	if err != nil {
 		log.Println(err)
@@ -74,13 +73,13 @@ func Sync(cmd *cobra.Command) {
 		srcURL := src + utils.IPFS_LIST_ENDPOINT
 
 		// Get the list of all CID's from the source IPFS
-		go utils.PostIPFS(0, srcURL, nil, r)
-		res := <- r
-		if res.Error != nil {
-			fmt.Println(res.Error)
+		// TODO: implement retry backoff with pester
+		resL, err := utils.PostIPFS(srcURL, nil)
+		if err != nil {
+			fmt.Println(err)
 		}
 
-		scanner := bufio.NewScanner(res.HTTPResponse.Body)
+		scanner := bufio.NewScanner(resL.Body)
 		for scanner.Scan() {
 			var j utils.IPFSCIDResponse
 			err := json.Unmarshal(scanner.Bytes(), &j)
@@ -92,7 +91,7 @@ func Sync(cmd *cobra.Command) {
 	}
 
 	// Create the API URL for the IPFS GET
-	srcGet := src + utils.IPFS_CAT_ENDPOINT
+	srcGet := fmt.Sprintf("%s%s", src, utils.IPFS_CAT_ENDPOINT)
 
 	counter := 1
 	length := len(cids)
@@ -102,40 +101,38 @@ func Sync(cmd *cobra.Command) {
 		log.Printf("%d/%d: Syncing the CID: %s\n",counter, length, k.Cid)
 
 		// Get CID from source
-		go utils.GetIPFS(counter, srcCID, nil, r)
-		resC := <-r
-		if resC.Error != nil {
-			log.Printf("%d/%d: %s",resC.Counter, length, resC.Error)
+		resG, err := utils.GetIPFS(srcCID, nil)
+		if err != nil {
+			log.Printf("%d/%d: %s",counter, length, err)
 			failed += 1
 			counter += 1
 			continue
 		}
-		defer resC.HTTPResponse.Body.Close()
+		defer resG.Body.Close()
 
 		cidV := utils.GetCIDVersion(k.Cid)
 		// Create the API URL fo the POST on destination
 		apiADD := fmt.Sprintf("%s%s?cid-version=%s", dst, utils.IPFS_PIN_ENDPOINT, cidV)
 
-		newBody, err := utils.GetHTTPBody(resC.HTTPResponse)
+		newBody, err := utils.GetHTTPBody(resG)
 		if err != nil {
-			log.Printf("%d/%d: %s",resC.Counter, length, err)
+			log.Printf("%d/%d: %s",counter, length, err)
 		}
 
 		// Sync IPFS CID into destination
 		// TODO: implement retry backoff with pester
 		var m utils.IPFSResponse
-		go utils.PostIPFS(resC.Counter, apiADD, newBody, r)
-		resP := <- r
-		if resP.Error != nil {
-			log.Printf("%d/%d: %s", resP.Counter, length, resP.Error)
+		resP, err := utils.PostIPFS(apiADD, newBody)
+		if err != nil {
+			log.Printf("%d/%d: %s", counter, length, err)
 			failed += 1
 		} else {
-			defer resP.HTTPResponse.Body.Close()
+			defer resP.Body.Close()
 
 			// Generic function to parse the response and create a struct
-			err := utils.UnmarshalToStruct[utils.IPFSResponse](resC.HTTPResponse.Body, &m)
+			err := utils.UnmarshalToStruct[utils.IPFSResponse](resP.Body, &m)
 			if err != nil {
-				log.Printf("%d/%d: %s", resP.Counter, length, err)
+				log.Printf("%d/%d: %s", counter, length, err)
 			}
 		}
 
@@ -143,11 +140,11 @@ func Sync(cmd *cobra.Command) {
 		// If not the syncing didn't work
 		ok, err := utils.TestIPFSHash(k.Cid, m.Hash)
 		if err != nil {
-			log.Printf("%d/%d: %s",resP.Counter, length, err)
+			log.Printf("%d/%d: %s",counter, length, err)
 			failed += 1
 		} else {
 			// Print success message
-			log.Printf("%d/%d: %s",resP.Counter, length, ok)
+			log.Printf("%d/%d: %s",counter, length, ok)
 			synced += 1
 		}
 		counter += 1
