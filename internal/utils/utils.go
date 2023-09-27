@@ -142,7 +142,7 @@ func TestIPFSHash(s string, d string) (string, error) {
         return "", fmt.Errorf("The source Hash %s is different from the destination hash %s", s, d)
     }
 
-    return fmt.Sprint("Successfully synced to destination IPFS"), nil
+    return fmt.Sprintf("Successfully synced to destination IPFS, CID: %s", s), nil
 }
 
 func SliceToCIDSStruct(s []string) ([]IPFSCIDResponse, error) {
