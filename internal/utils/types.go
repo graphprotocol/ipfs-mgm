@@ -3,6 +3,7 @@ package utils
 import "net/http"
 
 var DIR_LIST_ENDPOINT string = "/ipfs/api/v0/ls?arg="
+var PIN_LIST_ENDPOINT string = "/ipfs/api/v0/pin/ls"
 var CAT_ENDPOINT string = "/ipfs/api/v0/cat?arg="
 var IPFS_PIN_ENDPOINT string = "/ipfs/api/v0/add"
 var HEADER_APP_JSON string = "application/json"
