@@ -78,7 +78,7 @@ func Sync(cmd *cobra.Command) {
 
 		// Get the list of all CID's from the source IPFS
 		// TODO: implement retry backoff with pester
-		resL, err := utils.PostCID(listURL, nil)
+		resL, err := utils.PostCID(listURL, nil, "")
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -140,7 +140,7 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 	if err != nil {
 		// Check if it's a directory
 		if strings.Contains(fmt.Sprintf("%s", err), utils.DIR_ERROR) {
-			err := syncDir(src, dst, cidID)
+			err := syncDir(src, dst, cidID, cidID)
 			if err != nil {
 				utils.PrintLogMessage(*counter, length, cidID, fmt.Sprintf("%s", err))
 				*failed += 1
@@ -162,7 +162,7 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 		utils.PrintLogMessage(*counter, length, cidID, fmt.Sprintf("%s", err))
 	}
 
-	err = syncCall(src, dst, cidID, payload, false)
+	err = syncCall(src, dst, cidID, "", "", payload)
 	if err != nil {
 		utils.PrintLogMessage(*counter, length, cidID, fmt.Sprintf("%s", err))
 		*failed += 1
@@ -173,8 +173,8 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 	*synced += 1
 }
 
-func syncCall(src string, dst string, cid string, payload []byte, dir bool) error {
-	// We need to get the body as this was a fresh call
+func syncCall(src, dst, cid, parentCid, filePath string, payload []byte) error {
+	// We need to get the body if this was a fresh call
 	if len(payload) == 0 {
 		// Create the API URL for the IPFS GET
 		srcGet := fmt.Sprintf("%s%s%s", src, utils.CAT_ENDPOINT, cid)
@@ -194,9 +194,9 @@ func syncCall(src string, dst string, cid string, payload []byte, dir bool) erro
 	cidV := utils.GetCIDVersion(cid)
 
 	var apiADD string
-	if dir {
+	if len(filePath) != 0 {
 		// Create the API URL for the directory POST on destination
-		apiADD = fmt.Sprintf("%s%s?cid-version=%s&wrap-with-directory=1", dst, utils.IPFS_PIN_ENDPOINT, cidV)
+		apiADD = fmt.Sprintf("%s%s?cid-version=%s&wrap-with-directory=1&to-files=1", dst, utils.IPFS_PIN_ENDPOINT, cidV)
 	} else {
 		// Create the API URL for the POST on destination
 		apiADD = fmt.Sprintf("%s%s?cid-version=%s", dst, utils.IPFS_PIN_ENDPOINT, cidV)
@@ -204,35 +204,46 @@ func syncCall(src string, dst string, cid string, payload []byte, dir bool) erro
 
 	// Sync IPFS CID into destination
 	// TODO: implement retry backoff with pester
-	resP, err := utils.PostCID(apiADD, payload)
+	// log.Printf(filePath)
+	resP, err := utils.PostCID(apiADD, payload, filePath)
 	if err != nil {
 		return err
 	}
 	defer resP.Body.Close()
 
 	// Generic function to parse the response and create a struct
-	var m utils.IPFSResponse
-	err = utils.UnmarshalToStruct[utils.IPFSResponse](resP.Body, &m)
+	var m []utils.IPFSResponse
+	err = utils.UnmarshalIPFSResponse(resP.Body, &m)
 	if err != nil {
 		return err
 	}
-	log.Printf("DEBUG syncCall 1: %s, syncing: %s", m, cid)
 
 	// Check if the IPFS Hash is the same as the source one
 	// If not the syncing didn't work
-	err = utils.TestIPFSHash(cid, m.Hash)
-	if err != nil {
-		return err
+	ok := false
+	for _, v := range m {
+		if len(parentCid) != 0 {
+			if v.Hash == parentCid {
+				ok = true
+				break
+			}
+		} else {
+			if v.Hash == cid {
+				ok = true
+			}
+		}
+
 	}
 
-	log.Printf("Source: %s, Destination: %s", cid, m.Hash)
+	if !ok {
+		return fmt.Errorf("Can't be synced. The source and destination IPFS Hash differ")
+	}
 
 	return nil
 }
 
-func syncDir(src string, dst string, cid string) error {
-	listURL := fmt.Sprintf("%s%s%s", src, utils.DIR_LIST_ENDPOINT, cid)
-	log.Printf("DEBUG syncDir: %s", listURL)
+func syncDir(src, dst, file, parentCid string) error {
+	listURL := fmt.Sprintf("%s%s%s", src, utils.DIR_LIST_ENDPOINT, file)
 
 	// List directory
 	lsD, err := utils.GetCID(listURL, nil)
@@ -250,7 +261,7 @@ func syncDir(src string, dst string, cid string) error {
 
 	// Recursive function to sync all directory content
 	for _, v := range data.Objects {
-		err = syncDirContent(src, dst, v, true)
+		err = syncDirContent(src, dst, parentCid, v, true)
 		if err != nil {
 			return err
 		}
@@ -259,23 +270,20 @@ func syncDir(src string, dst string, cid string) error {
 	return nil
 }
 
-func syncDirContent(src string, dst string, data utils.Object, s bool) error {
-	log.Printf("DEBUG syncDirContent 1: %v\n", data)
-
+func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error {
 	for _, v := range data.Links {
 		// Syntax: https://ipfs.com/ipfs/api/v0/cat?arg=QmcoBTSpxyBx2AuUqhuy5X1UrasbLoz76QFGLgqUqhXLK6/foo.txt
-		url := fmt.Sprintf("%s%s%s/%s", src, utils.CAT_ENDPOINT, data.Hash, v.Name)
+		filePath := fmt.Sprintf("%s/%s", data.Hash, v.Name)
+		url := fmt.Sprintf("%s%s%s", src, utils.CAT_ENDPOINT, filePath)
 
-		log.Printf("DEBUG syncDirContent 2: %s", url)
 		_, err := utils.GetCID(url, nil)
 		if err != nil {
 			// Check if it's a directory
 			// If true, the new source will be like: https://ipfs.com/ipfs/api/v0/cat?arg=QmcoBTSpxyBx2AuUqhuy5X1UrasbLoz76QFGLgqUqhXLK6/FOO
 			if strings.Contains(fmt.Sprintf("%s", err), utils.DIR_ERROR) {
 				// The new CID for directory will be like: QmcoBTSpxyBx2AuUqhuy5X1UrasbLoz76QFGLgqUqhXLK6/FOO
-				dirCID := fmt.Sprintf("%s/%s", data.Hash, v.Name)
-				log.Printf("DEBUG syncDirContent 3: %s", dirCID)
-				err := syncDir(src, dst, dirCID)
+				filePath := fmt.Sprintf("%s/%s", data.Hash, v.Name)
+				err := syncDir(src, dst, filePath, v.Hash)
 				if err != nil {
 					return err
 				}
@@ -283,7 +291,7 @@ func syncDirContent(src string, dst string, data utils.Object, s bool) error {
 				return err
 			}
 		} else {
-			err = syncCall(src, dst, v.Hash, []byte{}, true)
+			err = syncCall(src, dst, v.Hash, parentCID, filePath, []byte{})
 			if err != nil {
 				return err
 			}

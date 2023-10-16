@@ -10,22 +10,26 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
-func ValidateEndpoints(src string, dst string) error {
-	if src == dst {
-		return fmt.Errorf("Error: The specified source <%s> is the same as the destination <%s>", src, dst)
+func createTempDirWithFile(f []string) (*os.File, error) {
+	dir := f[:len(f)-1]
+	// Create the directories for the CID structure
+	err := os.MkdirAll(strings.Join(dir, "/"), 0755)
+	if err != nil {
+		return nil, err
 	}
-	return nil
-}
 
-// GenerateTempFileName generates a temporary file name.
-func GenerateTempFileName(prefix, suffix string) string {
-	return filepath.Join(os.TempDir(), fmt.Sprintf("%s%d%s", prefix, time.Now().UnixNano(), suffix))
+	file, err := os.Create(fmt.Sprintf("%s", strings.Join(f, "/")))
+	if err != nil {
+		return nil, err
+	}
+
+	return file, nil
 }
 
 func GetCID(url string, payload io.Reader) (*http.Response, error) {
@@ -59,12 +63,25 @@ func GetCID(url string, payload io.Reader) (*http.Response, error) {
 	return res, nil
 }
 
-func PostCID(url string, payload []byte) (*http.Response, error) {
-	// Generate a unique temporary file name
-	tempFileName := GenerateTempFileName("ipfs-data-", ".tmp")
+func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
+	var tempFileName []string
+	var base string
+	if len(fPath) != 0 {
+		tempFileName = strings.Split(fPath, "/")
+		base = tempFileName[0]
+		// Fix the nested directories
+		if len(tempFileName) > 2 {
+			tempFileName = tempFileName[1:]
+			base = tempFileName[0]
+		}
+	} else {
+		// Generate a unique temporary file name
+		base = fmt.Sprintf("%d", time.Now().UnixNano())
+		tempFileName = []string{base, "ipfs-data.tmp"}
+	}
 
 	// Create a temporary file to store the IPFS object data
-	tempFile, err := os.Create(tempFileName)
+	tempFile, err := createTempDirWithFile(tempFileName)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating temporary file: %s", err)
 	}
@@ -79,7 +96,7 @@ func PostCID(url string, payload []byte) (*http.Response, error) {
 	// Create a new HTTP POST request to add the file to the destination
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	filePart, err := writer.CreateFormFile("file", filepath.Base(tempFileName))
+	filePart, err := writer.CreateFormFile("file", strings.Join(tempFileName, "/"))
 	if err != nil {
 		return nil, fmt.Errorf("Error creating form file: %s", err)
 	}
@@ -95,15 +112,25 @@ func PostCID(url string, payload []byte) (*http.Response, error) {
 
 	writer.Close() // Close the multipart writer
 
-	req, err := http.NewRequest(http.MethodPost, url, body)
+	req, err := http.NewRequest(http.MethodPost, dst, body)
 	if err != nil {
 		return nil, fmt.Errorf("There was an error creating the HTTP request: %s", err)
 	}
 
 	// Set custom User-Agent for cloudflare WAF policies
 	req.Header.Set("User-Agent", "graphprotocol/ipfs-mgm")
-
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Set Directory Headers
+	if len(fPath) != 0 {
+		f := strings.Split(fPath, "/")
+		fileNameParts := strings.Split(f[len(f)-1], ".")
+		fileName := fileNameParts[0]
+		_, a, _ := strings.Cut(fPath, "/")
+		req.Header.Set("Content-Disposition", fmt.Sprintf("form-data; name=\"%s\"; filename=%s", fileName, url.PathEscape(a)))
+		req.Header.Set("Abspath", fmt.Sprintf("%s", tempFileName))
+	}
+	defer os.RemoveAll(base)
 
 	// Create an HTTP client
 	client := &http.Client{}
@@ -140,7 +167,7 @@ func GetCIDVersion(cid string) string {
 
 func TestIPFSHash(s string, d string) error {
 	if s != d {
-		return fmt.Errorf("The source Hash %s is different from the destination hash %s", s, d)
+		return fmt.Errorf("The source IPFS Hash is different from the destination Hash%s", "")
 	}
 
 	return nil
@@ -168,11 +195,28 @@ func SliceToCIDSStruct(s []string) ([]IPFSCIDResponse, error) {
 
 func UnmarshalToStruct[V Data | IPFSResponse | IPFSCIDResponse | IPFSErrorResponse](h io.ReadCloser, m *V) error {
 	scanner := bufio.NewScanner(h)
+
 	for scanner.Scan() {
 		err := json.Unmarshal(scanner.Bytes(), &m)
 		if err != nil {
 			return fmt.Errorf("Error Unmarshaling the structure: %s", err)
 		}
+	}
+
+	return nil
+}
+
+func UnmarshalIPFSResponse(h io.ReadCloser, m *[]IPFSResponse) error {
+	scanner := bufio.NewScanner(h)
+
+	for scanner.Scan() {
+		var rm IPFSResponse
+		err := json.Unmarshal(scanner.Bytes(), &rm)
+		if err != nil {
+			return err
+		}
+
+		*m = append(*m, rm)
 	}
 
 	return nil
