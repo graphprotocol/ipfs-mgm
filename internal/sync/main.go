@@ -74,7 +74,7 @@ func Sync(cmd *cobra.Command) {
 		log.Printf("Syncing from %s to %s\n", src, dst)
 
 		// Create the API URL for the IPFS pin/ls operation
-		listURL := fmt.Sprintf("%s%s", src, utils.DIR_LIST_ENDPOINT)
+		listURL := fmt.Sprintf("%s%s", src, utils.PIN_LIST_ENDPOINT)
 
 		// Get the list of all CID's from the source IPFS
 		// TODO: implement retry backoff with pester
