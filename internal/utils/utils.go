@@ -33,7 +33,7 @@ func createTempDirWithFile(f []string) (*os.File, error) {
 }
 
 func GetCID(url string, payload io.Reader) (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, url, payload)
+	req, err := http.NewRequest(http.MethodPost, url, payload)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating HTTP request: %s", err)
 	}
