@@ -16,7 +16,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.3 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
-	github.com/libp2p/go-libp2p v0.26.3 // indirect
+	github.com/libp2p/go-libp2p v0.27.8 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/minio/sha256-simd v1.0.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
