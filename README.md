@@ -2,6 +2,18 @@
 
 Script to manage the IPFS files. It can be used to sync the CID's between two nodes
 
+## Build
+
+```
+go build -o bin/ipfs-mgm cmd/cli/ipfs-mgm.go
+```
+
+or use the Dockerfile
+
+```
+docker build -t ipfs-mgm .
+```
+
 ## Install
 
 ### Manually
@@ -58,6 +70,12 @@ The easiest way is to use the built docker image
 
 ```bash
 docker run -it ghcr.io/graphprotocol/ipfs-mgm sync --help
+```
+
+When using a local file
+
+```bash
+docker run -it -v $PWD:/app ghcr.io/graphprotocol/ipfs-mgm sync -s <SOURCE_ENDPOINT> -d <SOURCE_ENDPOINT> -f /app/file
 ```
 
 ## TODO:
