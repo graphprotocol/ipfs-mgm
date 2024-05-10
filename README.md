@@ -63,4 +63,6 @@ docker run -it ghcr.io/graphprotocol/ipfs-mgm sync --help
 ## TODO:
 
 - [ ] Implement async calls by creating a worker queue in batches
-- [ ] Add directory support for sync operation
+- [ ] Check for exisging IPFS files on destination to not try to sync twice. It's not critical due to IPFS immutability but critical to decrease the load
+- [ ] Control the sync batches with a pause between them to decrease the load on destination
+- [x] Add directory support for sync operation
