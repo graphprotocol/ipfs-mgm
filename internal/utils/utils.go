@@ -120,6 +120,7 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	// Set custom User-Agent for cloudflare WAF policies
 	req.Header.Set("User-Agent", "graphprotocol/ipfs-mgm")
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	// req.Header.Set("Content-Type", "multipart/form-data")
 
 	// Set Directory Headers
 	if len(fPath) != 0 {
@@ -232,7 +233,10 @@ func ReadCIDFromFile(f string) ([]string, error) {
 	var s []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		s = append(s, scanner.Text())
+		txt := scanner.Text()
+		if len(txt) > 0 {
+			s = append(s, scanner.Text())
+		}
 	}
 
 	return s, nil

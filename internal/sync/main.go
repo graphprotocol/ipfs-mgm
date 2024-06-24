@@ -23,14 +23,14 @@ var SyncCmd = &cobra.Command{
 	},
 }
 
-var workerItemCount int = 50
-
 func init() {
 	SyncCmd.Flags().StringP("source", "s", "", "IPFS source endpoint")
 	SyncCmd.MarkFlagRequired("source")
 	SyncCmd.Flags().StringP("destination", "d", "", "IPFS destination endpoint")
 	SyncCmd.MarkFlagRequired("destination")
 	SyncCmd.Flags().StringP("from-file", "f", "", "Sync CID's from file")
+	SyncCmd.Flags().IntP("batch", "b", 100, "Batch files to sync in paralel")
+	SyncCmd.Flags().IntP("cooldown", "c", 0, "Cooldown in seconds between the batches, by default not used. Only used with baches options, ignored otherwise")
 }
 
 func Sync(cmd *cobra.Command) {
@@ -40,7 +40,13 @@ func Sync(cmd *cobra.Command) {
 
 	var cids []utils.IPFSCIDResponse
 
-	// Get all command flags
+	// check if syncing only the CIDS specified in the file
+	fromFile, err := cmd.Flags().GetString("from-file")
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	// get source to sync from
 	src, err := cmd.Flags().GetString("source")
 	if err != nil {
 		log.Println(err)
@@ -51,21 +57,36 @@ func Sync(cmd *cobra.Command) {
 		log.Println(err)
 	}
 
-	fromFile, err := cmd.Flags().GetString("from-file")
+	cooldown, err := cmd.Flags().GetInt("cooldown")
+	if err != nil {
+		log.Println(err)
+	}
+
+	if cooldown < 0 {
+		fmt.Printf("The specified cooldown is not valid, it must be greater or equal to 0. Specified %d", cooldown)
+		os.Exit(1)
+	}
+
+	batch, err := cmd.Flags().GetInt("batch")
 	if err != nil {
 		fmt.Println(err)
+	}
+	if batch <= 0 {
+		fmt.Printf("The specified batch is not valid, it must be greater than 0. Specified %d", batch)
+		cooldown = 0
+		os.Exit(1)
 	}
 
 	// Will use the file only if specified
 	if len(fromFile) > 0 {
-		log.Printf("Syncing from %s to %s using the file <%s> as input\n", src, dst, fromFile)
+		log.Printf("Syncing from <%s> to <%s> using as input the file <%s>\n", src, dst, fromFile)
 		c, err := utils.ReadCIDFromFile(fromFile)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
 
-		// Create our structure with the CIDS's
+		// Create our structure with the CID's
 		cids, err = utils.SliceToCIDSStruct(c)
 		if err != nil {
 			fmt.Println(err)
@@ -97,27 +118,35 @@ func Sync(cmd *cobra.Command) {
 	}
 
 	counter := 1
+
 	length := len(cids)
+	log.Printf("There are %d CIDs to be synced", length)
 
 	// Adjust for the number of CID's
-	if length < workerItemCount {
-		workerItemCount = length
+	if batch > length {
+		batch = length
+		log.Printf("Using %d batch calls as there are %d CIDs to sync\n", batch, length)
+	} else {
+		log.Printf("Using %d batch calls\n", batch)
 	}
 
 	for i := 0; i < length; {
 		// Create a channel with buffer of workerItemCount size
-		workChan := make(chan utils.HTTPResult, workerItemCount)
+		workChan := make(chan utils.HTTPResult, batch)
 		var wg sync.WaitGroup
 
-		for j := 0; j < workerItemCount; j++ {
+		for j := 0; j < batch; j++ {
 			wg.Add(1)
 			go func(c int, cidID string) {
 				defer wg.Done()
 				AsyncCall(src, dst, cidID, &c, length, &failed, &synced)
-
 			}(counter, cids[i].Cid)
 			counter += 1
 			i++
+		}
+
+		if cooldown > 0 {
+			time.Sleep(time.Duration(cooldown) * time.Second)
 		}
 
 		close(workChan)

@@ -47,6 +47,14 @@ ipfs-mgm sync --help
 ipfs-mgm sync -s <SOURCE URL> -d <DESTINATION URL>
 ```
 
+#### Transfer all files using batches and cooldown
+
+```bash
+ipfs-mgm sync -s <SOURCE URL> -d <DESTINATION URL> -f cids -c 5 -b 100
+```
+*INFO: `-b 100` will transfer the files in batches of 100 in paralel and wait 5 seconds (`-c 5`) in between the batches to avoid overloading the IPFS nodes*
+
+
 #### Transfer only specific files from one IPFS node to another:
 
 ```bash
