@@ -2,6 +2,18 @@
 
 Script to manage the IPFS files. It can be used to sync the CID's between two nodes
 
+## Build
+
+```
+go build -o bin/ipfs-mgm cmd/cli/ipfs-mgm.go
+```
+
+or use the Dockerfile
+
+```
+docker build -t ipfs-mgm .
+```
+
 ## Install
 
 ### Manually
@@ -35,6 +47,14 @@ ipfs-mgm sync --help
 ipfs-mgm sync -s <SOURCE URL> -d <DESTINATION URL>
 ```
 
+#### Transfer all files using batches and cooldown
+
+```bash
+ipfs-mgm sync -s <SOURCE URL> -d <DESTINATION URL> -f cids -c 5 -b 100
+```
+*INFO: `-b 100` will transfer the files in batches of 100 in paralel and wait 5 seconds (`-c 5`) in between the batches to avoid overloading the IPFS nodes*
+
+
 #### Transfer only specific files from one IPFS node to another:
 
 ```bash
@@ -58,6 +78,12 @@ The easiest way is to use the built docker image
 
 ```bash
 docker run -it ghcr.io/graphprotocol/ipfs-mgm sync --help
+```
+
+When using a local file
+
+```bash
+docker run -it -v $PWD:/app ghcr.io/graphprotocol/ipfs-mgm sync -s <SOURCE_ENDPOINT> -d <SOURCE_ENDPOINT> -f /app/file
 ```
 
 ## TODO:

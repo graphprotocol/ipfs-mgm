@@ -2,6 +2,8 @@ package utils
 
 import "net/http"
 
+var GATEWAY_TIMEOUT_HEADERS int8 = 120
+
 var DIR_LIST_ENDPOINT string = "/ipfs/api/v0/ls?arg="
 var PIN_LIST_ENDPOINT string = "/ipfs/api/v0/pin/ls?stream=true"
 var CAT_ENDPOINT string = "/ipfs/api/v0/cat?arg="
@@ -34,8 +36,7 @@ type HTTPResult struct {
 }
 
 type IPFSCIDResponse struct {
-	Cid  string `json:"cid"`
-	Type string `json:"type"`
+	Cid string `json:"cid"`
 }
 
 type IPFSResponse struct {
