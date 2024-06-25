@@ -154,7 +154,7 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	}
 
 	if s := res.Status; strings.HasPrefix(s, "5") || strings.HasPrefix(s, "4") {
-		return nil, fmt.Errorf("the endpoint responded with: HTTP %s, when executing POST request on <%s>", dst, s)
+		return nil, fmt.Errorf("the endpoint responded with: HTTP %s, when executing POST request on <%s>", s, dst)
 	}
 
 	return res, nil
