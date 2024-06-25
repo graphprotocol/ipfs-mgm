@@ -42,8 +42,13 @@ func GetCID(url string, payload io.Reader) (*http.Response, error) {
 	// Set custom User-Agent for cloudflare WAF policies
 	req.Header.Set("User-Agent", "graphprotocol/ipfs-mgm")
 
+	// configure http transport
+	tr := &http.Transport{
+		DisableCompression:    false,
+		ResponseHeaderTimeout: time.Duration(time.Second * time.Duration(GATEWAY_TIMEOUT_HEADERS)),
+	}
 	// Create an HTTP client
-	client := &http.Client{}
+	client := &http.Client{Transport: tr}
 
 	res, err := client.Do(req)
 	if err != nil {
