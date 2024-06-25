@@ -30,7 +30,7 @@ func init() {
 	SyncCmd.MarkFlagRequired("destination")
 	SyncCmd.Flags().StringP("from-file", "f", "", "Sync CID's from file")
 	SyncCmd.Flags().IntP("batch", "b", 100, "Batch files to sync in paralel")
-	SyncCmd.Flags().IntP("cooldown", "c", 0, "Cooldown in seconds between the batches, by default not used. Only used with baches options, ignored otherwise")
+	SyncCmd.Flags().IntP("cooldown", "c", 0, "Cooldown in seconds between the batches, by default not used")
 }
 
 func Sync(cmd *cobra.Command) {
@@ -43,7 +43,7 @@ func Sync(cmd *cobra.Command) {
 	// check if syncing only the CIDS specified in the file
 	fromFile, err := cmd.Flags().GetString("from-file")
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
 
 	// get source to sync from
@@ -63,17 +63,17 @@ func Sync(cmd *cobra.Command) {
 	}
 
 	if cooldown < 0 {
-		fmt.Printf("The specified cooldown is not valid, it must be greater or equal to 0. Specified %d", cooldown)
+		log.Printf("The specified cooldown is not valid, it must be greater or equal to 0. Specified %d", cooldown)
 		os.Exit(1)
 	}
 
 	batch, err := cmd.Flags().GetInt("batch")
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
+
 	if batch <= 0 {
-		fmt.Printf("The specified batch is not valid, it must be greater than 0. Specified %d", batch)
-		cooldown = 0
+		log.Printf("The specified batch is not valid, it must be greater than 0. Specified %d", batch)
 		os.Exit(1)
 	}
 
@@ -82,14 +82,14 @@ func Sync(cmd *cobra.Command) {
 		log.Printf("Syncing from <%s> to <%s> using as input the file <%s>\n", src, dst, fromFile)
 		c, err := utils.ReadCIDFromFile(fromFile)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			os.Exit(1)
 		}
 
 		// Create our structure with the CID's
 		cids, err = utils.SliceToCIDSStruct(c)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 	} else {
 		log.Printf("Syncing from %s to %s\n", src, dst)
@@ -101,7 +101,7 @@ func Sync(cmd *cobra.Command) {
 		// TODO: implement retry backoff with pester
 		resL, err := utils.PostCID(listURL, nil, "")
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 		defer resL.Body.Close()
 
@@ -111,7 +111,7 @@ func Sync(cmd *cobra.Command) {
 			var j utils.IPFSCIDResponse
 			err := json.Unmarshal(scanner.Bytes(), &j)
 			if err != nil {
-				fmt.Printf("Error unmarshaling the response: %s", err)
+				log.Printf("Error unmarshaling the response: %s", err)
 			}
 			cids = append(cids, j)
 		}

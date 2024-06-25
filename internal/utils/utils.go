@@ -18,6 +18,7 @@ import (
 
 func createTempDirWithFile(f []string) (*os.File, error) {
 	dir := f[:len(f)-1]
+
 	// Create the directories for the CID structure
 	err := os.MkdirAll(strings.Join(dir, "/"), 0755)
 	if err != nil {
@@ -35,7 +36,7 @@ func createTempDirWithFile(f []string) (*os.File, error) {
 func GetCID(url string, payload io.Reader) (*http.Response, error) {
 	req, err := http.NewRequest(http.MethodPost, url, payload)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating HTTP request: %s", err)
+		return nil, fmt.Errorf("error creating HTTP request: %s", err)
 	}
 
 	// Set custom User-Agent for cloudflare WAF policies
@@ -46,7 +47,7 @@ func GetCID(url string, payload io.Reader) (*http.Response, error) {
 
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Error making API request: %s", err)
+		return nil, fmt.Errorf("error making API request: %s", err)
 	}
 
 	if s := res.Status; strings.HasPrefix(s, "5") || strings.HasPrefix(s, "4") {
@@ -54,9 +55,9 @@ func GetCID(url string, payload io.Reader) (*http.Response, error) {
 		var dirIPFS IPFSErrorResponse
 		_ = UnmarshalToStruct[IPFSErrorResponse](res.Body, &dirIPFS)
 		if dirIPFS.Message == DIR_ERROR {
-			return nil, fmt.Errorf("Cannot get this IPFS CID. Error message: %s", dirIPFS.Message)
+			return nil, fmt.Errorf("cannot get this IPFS CID. Error message: %s", dirIPFS.Message)
 		} else {
-			return nil, fmt.Errorf("There was an error with the request. Error code: HTTP %s", s)
+			return nil, fmt.Errorf("there was an error with the request. Error code: HTTP %s", s)
 		}
 	}
 
@@ -66,6 +67,7 @@ func GetCID(url string, payload io.Reader) (*http.Response, error) {
 func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	var tempFileName []string
 	var base string
+
 	if len(fPath) != 0 {
 		tempFileName = strings.Split(fPath, "/")
 		base = tempFileName[0]
@@ -83,14 +85,14 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	// Create a temporary file to store the IPFS object data
 	tempFile, err := createTempDirWithFile(tempFileName)
 	if err != nil {
-		return nil, fmt.Errorf("Error creating temporary file: %s", err)
+		return nil, fmt.Errorf("error creating temporary file: %s", err)
 	}
 	defer tempFile.Close()
 
 	// Write the IPFS object data to the temporary file
 	_, err = tempFile.Write(payload)
 	if err != nil {
-		return nil, fmt.Errorf("Error writing data to temporary file: %s", err)
+		return nil, fmt.Errorf("error writing data to temporary file: %s", err)
 	}
 
 	// Create a new HTTP POST request to add the file to the destination
@@ -98,7 +100,7 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	writer := multipart.NewWriter(body)
 	filePart, err := writer.CreateFormFile("file", strings.Join(tempFileName, "/"))
 	if err != nil {
-		return nil, fmt.Errorf("Error creating form file: %s", err)
+		return nil, fmt.Errorf("error creating form file: %s", err)
 	}
 
 	// Reset the temporary file pointer to the beginning
@@ -107,14 +109,14 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	// Copy the temporary file data into the form file
 	_, err = io.Copy(filePart, tempFile)
 	if err != nil {
-		return nil, fmt.Errorf("Error copying file data: %s", err)
+		return nil, fmt.Errorf("error copying file data: %s", err)
 	}
 
 	writer.Close() // Close the multipart writer
 
 	req, err := http.NewRequest(http.MethodPost, dst, body)
 	if err != nil {
-		return nil, fmt.Errorf("There was an error creating the HTTP request: %s", err)
+		return nil, fmt.Errorf("there was an error creating the HTTP request: %s", err)
 	}
 
 	// Set custom User-Agent for cloudflare WAF policies
@@ -133,16 +135,21 @@ func PostCID(dst string, payload []byte, fPath string) (*http.Response, error) {
 	}
 	defer os.RemoveAll(base)
 
+	// configure http transport
+	tr := &http.Transport{
+		DisableCompression:    false,
+		ResponseHeaderTimeout: time.Duration(time.Second * time.Duration(GATEWAY_TIMEOUT_HEADERS)),
+	}
 	// Create an HTTP client
-	client := &http.Client{}
+	client := &http.Client{Transport: tr}
 
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Error making API request: %s", err)
+		return nil, fmt.Errorf("error making API request: %s", err)
 	}
 
 	if s := res.Status; strings.HasPrefix(s, "5") || strings.HasPrefix(s, "4") {
-		return nil, fmt.Errorf("The endpoint responded with: HTTP %s", s)
+		return nil, fmt.Errorf("the endpoint responded with: HTTP %s", s)
 	}
 
 	return res, nil
@@ -152,7 +159,7 @@ func ParseHTTPBody(h *http.Response) ([]byte, error) {
 	// Read the body response
 	body, err := ioutil.ReadAll(h.Body)
 	if err != nil {
-		return nil, fmt.Errorf("Error reading response body: %s", err)
+		return nil, fmt.Errorf("error reading response body: %s", err)
 	}
 
 	return body, nil
@@ -168,7 +175,7 @@ func GetCIDVersion(cid string) string {
 
 func TestIPFSHash(s string, d string) error {
 	if s != d {
-		return fmt.Errorf("The source IPFS Hash is different from the destination Hash%s", "")
+		return fmt.Errorf("the source IPFS Hash is different from the destination Hash%s", "")
 	}
 
 	return nil
@@ -187,7 +194,7 @@ func SliceToCIDSStruct(s []string) ([]IPFSCIDResponse, error) {
 		a := fmt.Sprintf(`{"cid":"%s"}`, k)
 		err := json.Unmarshal([]byte(a), &cid)
 		if err != nil {
-			return nil, fmt.Errorf("Error unmarshaling from slice to IPFS Struct: %s", err)
+			return nil, fmt.Errorf("error unmarshaling from slice to IPFS Struct: %s", err)
 		}
 		cids = append(cids, cid)
 	}
@@ -200,7 +207,7 @@ func UnmarshalToStruct[V Data | IPFSResponse | IPFSCIDResponse | IPFSErrorRespon
 	for scanner.Scan() {
 		err := json.Unmarshal(scanner.Bytes(), &m)
 		if err != nil {
-			return fmt.Errorf("Error Unmarshaling the structure: %s", err)
+			return fmt.Errorf("error Unmarshaling the structure: %s", err)
 		}
 	}
 
@@ -226,17 +233,21 @@ func UnmarshalIPFSResponse(h io.ReadCloser, m *[]IPFSResponse) error {
 func ReadCIDFromFile(f string) ([]string, error) {
 	file, err := os.Open(f)
 	if err != nil {
-		return nil, fmt.Errorf("Error opening the file <%s>", f)
+		return nil, fmt.Errorf("error opening the file <%s>", f)
 	}
 	defer file.Close()
 
 	var s []string
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		txt := scanner.Text()
-		if len(txt) > 0 {
+		line := scanner.Text()
+		if len(line) > 0 {
 			s = append(s, scanner.Text())
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("there was an error reading from file <%s>: %s", f, err)
 	}
 
 	return s, nil
