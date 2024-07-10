@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -160,6 +161,17 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 	srcGet := fmt.Sprintf("%s%s%s", src, utils.CAT_ENDPOINT, cidID)
 
 	utils.PrintLogMessage(*counter, length, cidID, "Syncing")
+
+	exist, err := checkIfExist(dst, cidID)
+	if err != nil {
+		log.Printf("error: %s", err)
+		return
+	}
+
+	if exist {
+		utils.PrintLogMessage(*counter, length, cidID, "Already exists on destination")
+		return
+	}
 
 	// Get CID from source
 	resG, err := utils.GetCID(srcGet, nil)
@@ -326,4 +338,20 @@ func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error
 	}
 
 	return nil
+}
+
+func checkIfExist(url string, cid string) (bool, error) {
+	srcGet := fmt.Sprintf("%s%s%s", url, utils.CAT_ENDPOINT, cid)
+
+	// Get CID from source
+	resG, err := utils.GetCID(srcGet, nil)
+	if err != nil {
+		return false, err
+	}
+
+	if resG.StatusCode == http.StatusOK {
+		return true, nil
+	}
+
+	return false, nil
 }
