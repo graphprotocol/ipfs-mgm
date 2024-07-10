@@ -2,6 +2,7 @@ package sync
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/graphprotocol/ipfs-mgm/internal/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 )
 
 var SyncCmd = &cobra.Command{
@@ -29,8 +31,8 @@ func init() {
 	SyncCmd.Flags().StringP("destination", "d", "", "IPFS destination endpoint")
 	SyncCmd.MarkFlagRequired("destination")
 	SyncCmd.Flags().StringP("from-file", "f", "", "Sync CID's from file")
+	SyncCmd.Flags().IntP("rate-limit", "l", 10, "Rate limit to apply to the requests")
 	SyncCmd.Flags().IntP("batch", "b", 100, "Batch files to sync in paralel")
-	SyncCmd.Flags().IntP("cooldown", "c", 0, "Cooldown in seconds between the batches, by default not used")
 }
 
 func Sync(cmd *cobra.Command) {
@@ -57,20 +59,18 @@ func Sync(cmd *cobra.Command) {
 		log.Println(err)
 	}
 
-	cooldown, err := cmd.Flags().GetInt("cooldown")
-	if err != nil {
-		log.Println(err)
-	}
-
-	if cooldown < 0 {
-		log.Printf("The specified cooldown is not valid, it must be greater or equal to 0. Specified %d", cooldown)
-		os.Exit(1)
-	}
-
 	batch, err := cmd.Flags().GetInt("batch")
 	if err != nil {
 		log.Println(err)
 	}
+
+	rl, err := cmd.Flags().GetInt("rate-limit")
+	if err != nil {
+		log.Println(err)
+	}
+
+	// create the rate limit
+	mRL := rate.NewLimiter(rate.Every(10*time.Second), rl)
 
 	if batch <= 0 {
 		log.Printf("The specified batch is not valid, it must be greater than 0. Specified %d", batch)
@@ -131,12 +131,14 @@ func Sync(cmd *cobra.Command) {
 	}
 
 	for i := 0; i < length; {
-		// Create a channel with buffer of workerItemCount size
-		workChan := make(chan utils.HTTPResult, batch)
 		var wg sync.WaitGroup
 
 		for j := 0; j < batch; j++ {
 			wg.Add(1)
+			err := mRL.Wait(context.Background())
+			if err != nil {
+				log.Printf("%s\n", err)
+			}
 			go func(c int, cidID string) {
 				defer wg.Done()
 				AsyncCall(src, dst, cidID, &c, length, &failed, &synced)
@@ -145,11 +147,6 @@ func Sync(cmd *cobra.Command) {
 			i++
 		}
 
-		if cooldown > 0 {
-			time.Sleep(time.Duration(cooldown) * time.Second)
-		}
-
-		close(workChan)
 		wg.Wait()
 	}
 
