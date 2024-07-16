@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -162,16 +161,14 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 
 	utils.PrintLogMessage(*counter, length, cidID, "Syncing")
 
-	exist, err := checkIfExist(dst, cidID)
-	if err != nil {
-		log.Printf("error: %s", err)
-		return
-	}
-
-	if exist {
-		utils.PrintLogMessage(*counter, length, cidID, "Already exists on destination")
-		return
-	}
+	// exist, _ := checkIfExist(dst, cidID)
+	//
+	// // test first the exist bool and skip error if it doesn't exist because
+	// // in this case the error is not nil
+	// if exist {
+	// 	utils.PrintLogMessage(*counter, length, cidID, "Already exists on destination")
+	// 	return
+	// }
 
 	// Get CID from source
 	resG, err := utils.GetCID(srcGet, nil)
@@ -292,14 +289,14 @@ func syncDir(src, dst, file, parentCid string) error {
 
 	// Create the structure with the CID directory
 	var data utils.Data
-	err = utils.UnmarshalToStruct[utils.Data](lsD.Body, &data)
+	err = utils.UnmarshalToStruct(lsD.Body, &data)
 	if err != nil {
 		return err
 	}
 
 	// Recursive function to sync all directory content
 	for _, v := range data.Objects {
-		err = syncDirContent(src, dst, parentCid, v, true)
+		err = syncDirContent(src, dst, parentCid, v)
 		if err != nil {
 			return err
 		}
@@ -308,7 +305,7 @@ func syncDir(src, dst, file, parentCid string) error {
 	return nil
 }
 
-func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error {
+func syncDirContent(src, dst, parentCID string, data utils.Object) error {
 	for _, v := range data.Links {
 		// Syntax: https://ipfs.com/ipfs/api/v0/cat?arg=QmcoBTSpxyBx2AuUqhuy5X1UrasbLoz76QFGLgqUqhXLK6/foo.txt
 		filePath := fmt.Sprintf("%s/%s", data.Hash, v.Name)
@@ -340,18 +337,23 @@ func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error
 	return nil
 }
 
-func checkIfExist(url string, cid string) (bool, error) {
-	srcGet := fmt.Sprintf("%s%s%s", url, utils.CAT_ENDPOINT, cid)
+// func checkIfExist(url string, cid string) (bool, error) {
+// 	srcGet := fmt.Sprintf("%s%s%s", url, utils.CAT_ENDPOINT, cid)
 
-	// Get CID from source
-	resG, err := utils.GetCID(srcGet, nil)
-	if err != nil {
-		return false, err
-	}
+// 	// Get CID from source
+// 	resG, err := utils.GetCID(srcGet, nil)
+// 	if err != nil {
+// 		// If it's a directory then the CID exists, otherwise return the error
+// 		if strings.Contains(fmt.Sprintf("%s", err), utils.DIR_ERROR) {
+// 			return true, nil
+// 		} else {
+// 			return false, err
+// 		}
+// 	}
 
-	if resG.StatusCode == http.StatusOK {
-		return true, nil
-	}
+// 	if resG.StatusCode == http.StatusOK {
+// 		return true, nil
+// 	}
 
-	return false, nil
-}
+// 	return false, nil
+// }
