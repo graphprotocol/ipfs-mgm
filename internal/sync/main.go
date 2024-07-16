@@ -2,6 +2,7 @@ package sync
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/graphprotocol/ipfs-mgm/internal/utils"
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 )
 
 var SyncCmd = &cobra.Command{
@@ -23,14 +25,14 @@ var SyncCmd = &cobra.Command{
 	},
 }
 
-var workerItemCount int = 50
-
 func init() {
 	SyncCmd.Flags().StringP("source", "s", "", "IPFS source endpoint")
 	SyncCmd.MarkFlagRequired("source")
 	SyncCmd.Flags().StringP("destination", "d", "", "IPFS destination endpoint")
 	SyncCmd.MarkFlagRequired("destination")
 	SyncCmd.Flags().StringP("from-file", "f", "", "Sync CID's from file")
+	SyncCmd.Flags().IntP("rate-limit", "l", 10, "Rate limit to apply to the requests")
+	SyncCmd.Flags().IntP("batch", "b", 100, "Batch files to sync in paralel")
 }
 
 func Sync(cmd *cobra.Command) {
@@ -40,7 +42,13 @@ func Sync(cmd *cobra.Command) {
 
 	var cids []utils.IPFSCIDResponse
 
-	// Get all command flags
+	// check if syncing only the CIDS specified in the file
+	fromFile, err := cmd.Flags().GetString("from-file")
+	if err != nil {
+		log.Println(err)
+	}
+
+	// get source to sync from
 	src, err := cmd.Flags().GetString("source")
 	if err != nil {
 		log.Println(err)
@@ -51,24 +59,37 @@ func Sync(cmd *cobra.Command) {
 		log.Println(err)
 	}
 
-	fromFile, err := cmd.Flags().GetString("from-file")
+	batch, err := cmd.Flags().GetInt("batch")
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
+	}
+
+	rl, err := cmd.Flags().GetInt("rate-limit")
+	if err != nil {
+		log.Println(err)
+	}
+
+	// create the rate limit
+	mRL := rate.NewLimiter(rate.Every(10*time.Second), rl)
+
+	if batch <= 0 {
+		log.Printf("The specified batch is not valid, it must be greater than 0. Specified %d", batch)
+		os.Exit(1)
 	}
 
 	// Will use the file only if specified
 	if len(fromFile) > 0 {
-		log.Printf("Syncing from %s to %s using the file <%s> as input\n", src, dst, fromFile)
+		log.Printf("Syncing from <%s> to <%s> using as input the file <%s>\n", src, dst, fromFile)
 		c, err := utils.ReadCIDFromFile(fromFile)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 			os.Exit(1)
 		}
 
-		// Create our structure with the CIDS's
+		// Create our structure with the CID's
 		cids, err = utils.SliceToCIDSStruct(c)
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 	} else {
 		log.Printf("Syncing from %s to %s\n", src, dst)
@@ -80,7 +101,7 @@ func Sync(cmd *cobra.Command) {
 		// TODO: implement retry backoff with pester
 		resL, err := utils.PostCID(listURL, nil, "")
 		if err != nil {
-			fmt.Println(err)
+			log.Println(err)
 		}
 		defer resL.Body.Close()
 
@@ -90,37 +111,42 @@ func Sync(cmd *cobra.Command) {
 			var j utils.IPFSCIDResponse
 			err := json.Unmarshal(scanner.Bytes(), &j)
 			if err != nil {
-				fmt.Printf("Error unmarshaling the response: %s", err)
+				log.Printf("Error unmarshaling the response: %s", err)
 			}
 			cids = append(cids, j)
 		}
 	}
 
 	counter := 1
+
 	length := len(cids)
+	log.Printf("There are %d CIDs to be synced", length)
 
 	// Adjust for the number of CID's
-	if length < workerItemCount {
-		workerItemCount = length
+	if batch > length {
+		batch = length
+		log.Printf("Using %d batch calls as there are %d CIDs to sync\n", batch, length)
+	} else {
+		log.Printf("Using %d batch calls\n", batch)
 	}
 
 	for i := 0; i < length; {
-		// Create a channel with buffer of workerItemCount size
-		workChan := make(chan utils.HTTPResult, workerItemCount)
 		var wg sync.WaitGroup
 
-		for j := 0; j < workerItemCount; j++ {
+		for j := 0; j < batch; j++ {
 			wg.Add(1)
+			err := mRL.Wait(context.Background())
+			if err != nil {
+				log.Printf("%s\n", err)
+			}
 			go func(c int, cidID string) {
 				defer wg.Done()
 				AsyncCall(src, dst, cidID, &c, length, &failed, &synced)
-
 			}(counter, cids[i].Cid)
 			counter += 1
 			i++
 		}
 
-		close(workChan)
 		wg.Wait()
 	}
 
@@ -134,6 +160,15 @@ func AsyncCall(src string, dst string, cidID string, counter *int, length int, f
 	srcGet := fmt.Sprintf("%s%s%s", src, utils.CAT_ENDPOINT, cidID)
 
 	utils.PrintLogMessage(*counter, length, cidID, "Syncing")
+
+	// exist, _ := checkIfExist(dst, cidID)
+	//
+	// // test first the exist bool and skip error if it doesn't exist because
+	// // in this case the error is not nil
+	// if exist {
+	// 	utils.PrintLogMessage(*counter, length, cidID, "Already exists on destination")
+	// 	return
+	// }
 
 	// Get CID from source
 	resG, err := utils.GetCID(srcGet, nil)
@@ -254,14 +289,14 @@ func syncDir(src, dst, file, parentCid string) error {
 
 	// Create the structure with the CID directory
 	var data utils.Data
-	err = utils.UnmarshalToStruct[utils.Data](lsD.Body, &data)
+	err = utils.UnmarshalToStruct(lsD.Body, &data)
 	if err != nil {
 		return err
 	}
 
 	// Recursive function to sync all directory content
 	for _, v := range data.Objects {
-		err = syncDirContent(src, dst, parentCid, v, true)
+		err = syncDirContent(src, dst, parentCid, v)
 		if err != nil {
 			return err
 		}
@@ -270,7 +305,7 @@ func syncDir(src, dst, file, parentCid string) error {
 	return nil
 }
 
-func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error {
+func syncDirContent(src, dst, parentCID string, data utils.Object) error {
 	for _, v := range data.Links {
 		// Syntax: https://ipfs.com/ipfs/api/v0/cat?arg=QmcoBTSpxyBx2AuUqhuy5X1UrasbLoz76QFGLgqUqhXLK6/foo.txt
 		filePath := fmt.Sprintf("%s/%s", data.Hash, v.Name)
@@ -301,3 +336,24 @@ func syncDirContent(src, dst, parentCID string, data utils.Object, s bool) error
 
 	return nil
 }
+
+// func checkIfExist(url string, cid string) (bool, error) {
+// 	srcGet := fmt.Sprintf("%s%s%s", url, utils.CAT_ENDPOINT, cid)
+
+// 	// Get CID from source
+// 	resG, err := utils.GetCID(srcGet, nil)
+// 	if err != nil {
+// 		// If it's a directory then the CID exists, otherwise return the error
+// 		if strings.Contains(fmt.Sprintf("%s", err), utils.DIR_ERROR) {
+// 			return true, nil
+// 		} else {
+// 			return false, err
+// 		}
+// 	}
+
+// 	if resG.StatusCode == http.StatusOK {
+// 		return true, nil
+// 	}
+
+// 	return false, nil
+// }
